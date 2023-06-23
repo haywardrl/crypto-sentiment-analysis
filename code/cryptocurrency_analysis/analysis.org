@@ -1,0 +1,338 @@
+#+TITLE: Sentiment Analysis
+#+PROPERTY: header-args :tangle sentiment_analysis_final.py
+
+* Table of Contents
+- [[#import-python-modules][Import Python Modules]]
+- [[#tweet-extraction][Tweet Extraction]]
+  - [[#snapshot-extraction][Snapshot extraction]]
+  - [[#extended-extraction][Extended extraction]]
+- [[#tweet-cleaning][Tweet Cleaning]]
+- [[#sentiment-analysis][Sentiment Analysis]]
+- [[#update-and-clean-tweets---export-to-dataframe-and-csv][Update and Clean Tweets - Export to dataframe and CSV]]
+- [[#sentiment-dataframe][Sentiment Dataframe]]
+- [[#simple-tweet-count][Simple Tweet Count]]
+- [[#function-calls][Function Calls]]
+- [[#important-information-and-lessons-learnt][Important Information and Lessons learnt]]
+
+* Import Python Modules
+
+- Pandas required for reading/creating CSV files and creating dataframes to aide in analysis
+- TextBlob provides sentiment analysis for the Tweets using the Patter Library
+- re provides an interface to substitute, used here for regex substitution to clean tweet data
+- Twint provides the Twitter Scraping tool to collate tweets for the project
+
+#+begin_src python
+
+import pandas as pd
+from textblob import TextBlob
+import re
+import twint
+
+#+end_src
+
+* Tweet Extraction
+
+** Snapshot extraction
+
+- Function created to provide reusability, identifying the desired 'search term' for the extraction process
+- As the data needs to be stored in an efficient way, CSV was chosen. A database file was considered, however, to allow for quick access using other software, CSV was chosen. If the dataset was much larger and/or the user wanted to utilise some database functionality with SQLite3 or as a backend interface for a website, alternatively could use '.Store_db = True'
+- Hide_output was implemented to help increase the performance of the scrape as when set to False, all tweets are printed to the console.
+- The '.Since' and '.Until' parameters work retrospectively which provided some difficulty, particularly regarding the extended scrape. As an example, here the extraction would begin from the 31st and work back to the 14th. This provided some problems which will be discussed in the next section.
+- A significant barrier/limitation of this module was that the TwitterAPI did restrict some access to the web scraping tool and so it was quickly noticed that not all of the tweets were extracted.
+
+#+begin_src python
+
+def scrape(cryptocoin):
+    coin_search = twint.Config()
+    coin_search.Search = cryptocoin
+    coin_search.Store_csv = True
+    coin_search.Hide_output = True
+    coin_search.Count = True
+    if cryptocoin == "#Bitcoin":
+        coin_search.Output = "../../output_data/raw_tweet_data/bitcoin_tweets_results_snapshot.csv"
+    else:
+        coin_search.Output = "../../output_data/raw_tweet_data/cardano_tweets_results_snapshot.csv"
+    coin_search.Since = "2021-03-14"
+    coin_search.Until = "2021-03-31"
+    twint.run.Search(coin_search)
+
+#+end_src
+
+** Extended extraction
+
+- The extendedScrape function is almost identical to the above, however, a limit was provided for the number of tweets to be scraped (5000), and additional parameters were added to only allow extraction for a single day each month.
+- It was notices that on occassion, more that 5000 tweets were extracted, surpassing the limit
+- Using pythons string formatting functionality, I was able to substitute values for the data parameters, limiting extraction to a single day (the 1st of every month)
+- As mentioned above, the '.Since' and '.Until' worked retrospectively and so tweets were extracted from midnight on the 2nd of every month. This wasn't ideal as I was hoping to implement the extraction from midday, however the granular time function did not work for the Twint module.
+
+#+begin_src python
+
+def extendedScrape(cryptocoin, year, month):
+    coin_search = twint.Config()
+    coin_search.Search = cryptocoin
+    coin_search.Store_csv = True
+    coin_search.Hide_output = True
+    coin_search.Limit = 5000
+    coin_search.Count = True
+    if cryptocoin == "#Bitcoin":
+        coin_search.Output = "../../output_data/raw_tweet_data/bitcoin_tweets_results_extended.csv"
+    else:
+        coin_search.Output = "../../output_data/raw_tweet_data/cardano_tweets_results_extended.csv"
+    coin_search.Since = "20%s-%s-01" % (year, month)
+    coin_search.Until = "20%s-%s-02" % (year, month)
+    print(coin_search.Since)
+    print(coin_search.Until)
+    print(cryptocoin)
+    twint.run.Search(coin_search)
+
+#+end_src
+
+*** Timeline Function
+
+- I refactored the timeline funcitonality of the above function by creating an array which iterated through the desired months and years and were then passed through to the extendedScrape function as required parameters.
+
+#+begin_src python
+
+
+def timeline_scrape(search_term):
+    months = ['01', '02', '03', '04', '05',
+              '06', '07', '08', '09', '10', '11', '12']
+    years = ['18', '19', '20', '21']
+    curr_month = 0
+    curr_year = 0
+    i = 0
+    while i < 4:
+        if curr_month < 11:
+            extendedScrape(search_term, years[curr_year], months[curr_month])
+            curr_month += 1
+        else:
+            extendedScrape(search_term, years[curr_year], months[curr_month])
+            curr_month = 0
+            curr_year += 1
+            i += 1
+
+#+end_src
+
+* Tweet Cleaning
+
+- Using regex substitution was the simplest way to remove any unwanted data from the tweet string
+- During the initial sample extractions, it was notices that people were using the Bitcoin and Cardano hastags mid-sentence instead of just the word. As i wanted to remove any other hashtags but keep those, the '#' was removed.
+- Subsequently all other hashtags were removed given it was deemed 'noise' for the sentiment analysis tool.
+- Finally, both new lines and hyperlinks were removed. It was found that new lines were intereferring with both the Sentiment analysis tool as well as the ability for pandas to read the CSV files.
+
+  #+begin_src python
+
+def cleaned_tweet(original_tweet):
+    original_tweet = re.sub('#Bitcoin', 'Bitcoin', original_tweet)
+    original_tweet = re.sub('#Cardano', 'Cardano', original_tweet)
+    original_tweet = re.sub('#bitcoin', 'bitcoin', original_tweet)
+    original_tweet = re.sub('#cardano', 'cardano', original_tweet)
+    original_tweet = re.sub('#[A-Za-z0-9]+', '', original_tweet)
+    original_tweet = re.sub('@[A-Za-z0-9]+', '', original_tweet)
+    original_tweet = re.sub('\\n', '', original_tweet)
+    original_tweet = re.sub('https\S+', '', original_tweet)
+    return original_tweet
+
+  #+end_src
+
+
+* Sentiment Analysis
+
+- As mentioned in the README, TextvBlob provides additional functionality than just sentiment analysis
+- Using the pattern library, TextBlob assigns a numerical value to both subjectivity and polarity.
+- Polarity indicates positive, negative or neutral
+- Subjectivity is the prediction of whether or not the text was subjective or simply a fact.
+
+  #+begin_src python
+
+def getSubjectivity(original_tweet):
+    return TextBlob(original_tweet).sentiment.subjectivity
+
+
+def getPolarity(original_tweet):
+    return TextBlob(original_tweet).sentiment.polarity
+
+  #+end_src
+
+- The sentiment score provided by the TextBlob module was then converted into a string value to indicate it's sentiment. This function was created and then applied in the following section to create an additional column in the dataframe.
+
+  #+begin_src python
+
+def getSentiment(score):
+    if score < 0:
+        return 'Negative'
+    elif score == 0:
+        return 'Neutral'
+    else:
+        return 'Positive'
+
+  #+end_src
+
+* Update and Clean Tweets - Export to dataframe and CSV
+
+- Each of the functions detailed above were applied to the CSV file to create an additional dataframe with updated columns for 'Subjectivity', 'Polarity' and Sentiment
+- During the initial sample scrapes taken at the beginning of the project, the Twint functionality of specifying the 'language' of the Tweets was not working. This provided a problem for TextBlob and so the new dataframe selected only those tweets with 'en' (English) as the chosen language (TextBlob does provide an inbuilt translator, however, I was unable to assess its accuracy for large volumes of data).
+- The new dataframe was then written to a csv file using Pandas 'to.csv' function.
+
+#+begin_src python
+
+def dataframe_update(chosen_dataframe, coin, duration):
+    chosen_dataframe['Clean_Tweet'] = chosen_dataframe['tweet'].apply(
+        cleaned_tweet)
+
+    chosen_dataframe['Subjectivity'] = chosen_dataframe['Clean_Tweet'].apply(
+        getSubjectivity)
+    chosen_dataframe['Polarity'] = chosen_dataframe['Clean_Tweet'].apply(
+        getPolarity)
+
+    chosen_dataframe['Sentiment'] = chosen_dataframe['Polarity'].apply(
+        getSentiment)
+
+    chosen_dataframe = chosen_dataframe[chosen_dataframe['language'] == 'en']
+    chosen_dataframe.reset_index(inplace=True)
+
+    chosen_dataframe = chosen_dataframe[[
+        'date', 'Clean_Tweet', 'Subjectivity', 'Polarity', 'Sentiment']]
+
+    if duration == "snapshot":
+        chosen_dataframe.to_csv('../../output_data/clean_tweet_data/%s_cleaned_tweets_snapshot.csv' %
+                                (coin))
+    else:
+        chosen_dataframe.to_csv('../../output_data/clean_tweet_data/%s_cleaned_tweets_extended.csv' %
+                                (coin), index=False)
+
+    return chosen_dataframe
+
+#+end_src
+
+* Sentiment Dataframe
+
+- The updated dataframes required several adjustments to allow for simpler graphing. The easiest way to do this was to group by the date for several metrics
+- count_df: This was a simple count to asses the volume of tweets that were extracted on that day (as mentioned before, not all of the tweets from twitter were extracted due to limitations of the tool and updates to Twitters API)
+- positive_df: represents a count for all of the positve tweets on that day. For this, I used a gamma implementation to locate the string value of x for 'Positive' which was allocated by the getSubjectivity function. This was then replicated for both negative and neutral.
+- It was important to convert the date from an 'object' to 'datetime64' in the pandas dataframe. Previous attmepts were made to make this permanent in a previous function, however, pandas reverted this back to an 'object' and so manual conversion was required at each stage.
+- Separate dataframes for each sentiment value were created to allow for easier concatenation.
+- average_polarity_df and average_subjectivity_df were similar to the previous dataframes with the change of .count() to .mean() to calculate the averages.
+- For each dataframe, the new columns were given titles. Pandas dataframes uses the function .reset_index(name='') for this. In addition to renaming, .reset_index() was implemented for the 'date' column to allow for concatenation
+- sentiment_df is the final dataframe that concatenated all of the dataframes and finally converted to csv.
+
+#+begin_src python
+
+def sentiment_dataframe_creation(raw_tweet_data, cryptocoin, duration):
+    count_df = raw_tweet_data.groupby(
+        'date')['Clean_Tweet'].count().reset_index(name='tweets')
+    count_df['date'] = pd.to_datetime(count_df['date'])
+    count_df = count_df.set_index('date')
+    positive_df = raw_tweet_data.groupby('date')['Sentiment'].apply(
+        lambda x: (x == 'Positive').sum()).reset_index(name='positive_sentiment')
+    positive_df['date'] = pd.to_datetime(positive_df['date'])
+    positive_df = positive_df.set_index('date')
+    negative_df = raw_tweet_data.groupby('date')['Sentiment'].apply(
+        lambda x: (x == 'Negative').sum()).reset_index(name='negative_sentiment')
+    negative_df['date'] = pd.to_datetime(negative_df['date'])
+    negative_df = negative_df.set_index('date')
+    neutral_df = raw_tweet_data.groupby('date')['Sentiment'].apply(
+        lambda x: (x == 'Neutral').sum()).reset_index(name='neutral_sentiment')
+    neutral_df['date'] = pd.to_datetime(neutral_df['date'])
+    neutral_df = neutral_df.set_index('date')
+
+    average_polarity_df = raw_tweet_data.groupby(
+        'date')['Polarity'].mean().reset_index(name='average_polarity')
+    average_polarity_df['date'] = pd.to_datetime(average_polarity_df['date'])
+    average_polarity_df = average_polarity_df.set_index('date')
+
+    average_subjectivity_df = raw_tweet_data.groupby(
+        'date')['Subjectivity'].mean().reset_index(name='average_subjectivity')
+    average_subjectivity_df['date'] = pd.to_datetime(
+        average_subjectivity_df['date'])
+    average_subjectivity_df = average_subjectivity_df.set_index('date')
+
+    sentiment_df = pd.concat([count_df, positive_df, negative_df,
+                              neutral_df, average_polarity_df, average_subjectivity_df], axis=1)
+    sentiment_df['positive_percentage'] = (sentiment_df.positive_sentiment /
+                                           sentiment_df.tweets)
+    sentiment_df['negative_percentage'] = (
+        sentiment_df.negative_sentiment / sentiment_df.tweets)
+    sentiment_df['objective'] = (sentiment_df.positive_sentiment +
+                                 sentiment_df.negative_sentiment) / (sentiment_df.tweets)
+    sentiment_df['neutral'] = (1 - sentiment_df.objective)
+
+    if duration == 'snapshot':
+        sentiment_df.to_csv(
+            '../../output_data/sentiment_dataframes_csv/%s_sentiment_dataframe_snapshot.csv' % (cryptocoin))
+    else:
+        sentiment_df.to_csv(
+            '../../output_data/sentiment_dataframes_csv/%s_sentiment_dataframe_extended.csv' % (cryptocoin))
+
+#+end_src
+
+* Simple Tweet Count
+
+The following function was created to ascertain the number of tweets extracted post cleaning.
+
+#+begin_src python
+
+def tweet_volume_console_print(cleaned_tweet_dataframe):
+    print("Number of rows ", len(cleaned_tweet_dataframe.index))
+
+#+end_src
+
+* Function Calls
+
+Below are the function calls made for this part of the project:
+
+- First we have the snapshot extraction for both coins followed by the extended extraction
+- Dataframes were then created for all four extractions by reading the CSV files using Pandas
+- Each dataframe was then updated to create the additional fields for sentiment analysis
+- New dataframes were then created to read these cleaned csv files (this task could have been bundled together, however, to reduce the size of a function and provide easier debugging I separated them in case only one of the function calls was required).
+- Finally, the sentiment dataframes were created for the graphing.
+- Due to memory requirements and Pandas unable to distinguish the column headings at times, a lineterminator function was added to ensure that Pandas didn't miss any of the rows of data.
+
+#+begin_src python
+
+scrape("#Bitcoin")
+scrape("#Cardano")
+
+
+timeline_scrape("#Cardano")
+timeline_scrape("#Bitcoin")
+
+
+bitcoin_tweets_snapshot_df = pd.read_csv(
+    "../../output_data/raw_tweet_data/btc_tweets_results_snapshot.csv")
+cardano_tweets_snapshot_df = pd.read_csv(
+    "../../output_data/raw_tweet_data/ada_tweets_results_snapshot.csv")
+bitcoin_tweets__extended_df = pd.read_csv(
+    "../../output_data/raw_tweet_data/btc_tweets_results_extended.csv")
+cardano_tweets_extended_df = pd.read_csv(
+    "../../output_data/raw_tweet_data/ada_tweets_results_extended.csv")
+
+dataframe_update(bitcoin_tweets_snapshot_df, "bitcoin", "snapshot")
+dataframe_update(cardano_tweets_snapshot_df, "cardano", "snapshot")
+dataframe_update(bitcoin_tweets__extended_df, "bitcoin", "extended")
+dataframe_update(cardano_tweets_extended_df, "cardano", "extended")
+
+
+bitcoin_cleaned_tweets_snapshot_df = pd.read_csv(
+    "../../output_data/clean_tweet_data/bitcoin_cleaned_tweets_snapshot.csv", lineterminator='\n')
+cardano_cleaned_tweets_snapshot_df = pd.read_csv(
+    "../../output_data/clean_tweet_data/cardano_cleaned_tweets_snapshot.csv", lineterminator='\n')
+bitcoin_cleaned_tweets_extended_df = pd.read_csv(
+    "../../output_data/clean_tweet_data/bitcoin_cleaned_tweets_extended.csv", lineterminator='\n')
+cardano_cleaned_tweets_extended_df = pd.read_csv(
+    "../../output_data/clean_tweet_data/cardano_cleaned_tweets_extended.csv",lineterminator='\n')
+
+
+sentiment_dataframe_creation(bitcoin_cleaned_tweets_snapshot_df, "bitcoin", "snapshot")
+sentiment_dataframe_creation(cardano_cleaned_tweets_snapshot_df, "cardano", "snapshot")
+sentiment_dataframe_creation(
+    bitcoin_cleaned_tweets_extended_df, "bitcoin", "extended")
+sentiment_dataframe_creation(
+    cardano_cleaned_tweets_extended_df, "cardano", "extended")
+
+#+end_src
+
+* Important Information and Lessons learnt
+
+- This process of cleaning the tweets, applying the sentiment analysis and creating the new dataframes and CSV files had to be completed in a step by step process. Given the volume of data being extracted, I found it important to split up some of the dataframe creations as there were some memory leaks/memory capacity exceeded. This could be avoided with increased RAM, however, I also believe that both Pandas and Twint operate better within a Jupyter Notebook environment.
+- Furthermore, I noticed that there were dicrepencies and variations in the dataframes if multiple frames were created in the same compilation and execution. This may be due to the fact that Pandas was unable to separate the dataframe data when there were large amount of information being read simultaneously. This was also echoed during the graph creation stage and required me to create graphs individually.

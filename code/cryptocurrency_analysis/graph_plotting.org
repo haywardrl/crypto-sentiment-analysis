@@ -1,0 +1,486 @@
+#+TITLE: Graph Plotting
+#+PROPERTY: header-args :tangle sentiment_plots_final.py
+
+* Table of Contents
+- [[#import-python-modules][Import Python Modules]]
+- [[#graphs][Graphs]]
+  - [[#coin-closing-price][Coin Closing Price]]
+  - [[#polarity-histogram][Polarity Histogram]]
+  - [[#objectivity-vs-neutrality][Objectivity vs Neutrality]]
+  - [[#sentiment-vs-price][Sentiment vs Price]]
+  - [[#tweet-volume-vs-price][Tweet Volume vs Price]]
+  - [[#google-trend-interest-vs-price][Google Trend Interest vs Price]]
+  - [[#tweet-volume][Tweet Volume]]
+  - [[#correlation-heat-map][Correlation Heat map]]
+  - [[#function-callsgraph-creation][Function Calls/Graph Creation]]
+- [[#import-information-and-lessons-learnt][Import Information and Lessons Learnt]]
+
+* Import Python Modules
+
+- Pandas imported for reading/writing CSV files
+- Matplotlib has been chosen as the tool for creating graphs. Consideration was given to the use of GGplot and Seaborn, however, both were deemed either too complicated for the project, provided some compatibility issues, or provided no additional benefit
+- Numpy was imported as an optional module to manipulate some data and found use in the creation of the heatmap
+
+#+begin_src python
+
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+
+#+end_src
+
+* Graphs
+
+The following subsections detail the graphs that were created based on the data gathered from the sentiment_analysis.py file.
+
+** Coin Closing Price
+
+- As a baseline, the closing coin price for each coin was visualised for both a snapshot and extended period.
+- A line graph was chosen given the number of data points.
+- Additional string formatting applied to provide some reusability of the function for all variations required for analysis.
+- Closing price was chosen due to the fact that it provided the last available trading price for that day and minimised the impact of anomolous trading throughout the day that may have impacted the average price. Furthermore, allowed for increased time to assess whether or not the tweets/interest from that day has an impact on price.
+
+#+begin_src python
+
+def coin_prices(chosen_dataframe, duration, search_term):
+    df = pd.DataFrame(chosen_dataframe, columns=['Date', 'Close'])
+    df.plot.line(x='Date', y='Close', color='blue')
+    plt.ylabel('Close Price ($USD)')
+    plt.title("%s Prices" % (search_term.capitalize()))
+    plt.xticks(rotation=45)
+    if duration == "snapshot":
+        plt.savefig('../../output_data/plots/coin_price/%s_price_snapshot.png' %
+                    (search_term), bbox_inches='tight')
+    else:
+        plt.savefig('../../output_data/plots/coin_price/%s_price_extended.png' %
+                    (search_term), bbox_inches='tight')
+
+#+end_src
+
+** Polarity Histogram
+
+- Histograms provide insight as to the density of occurencies.
+- To provide enough granualarity over the -1 to 1 x-axis range, 60 'bins' were created.
+- To improve the granularity, the number of bins should be increased, however, through some experimentation, I found 60 to be the optimal number.
+
+#+begin_src python
+
+def polarity_hist(chosen_dataframe, duration, search_term):
+    total_bins = 60
+    plt.hist(
+        chosen_dataframe.Polarity, total_bins, facecolor='Purple')
+    plt.xlabel('Polarity')
+    plt.ylabel('Volume of Tweets')
+    if duration == "snapshot":
+        plt.title('%s Polarity Distribution Mar 2021' %
+                  (search_term.capitalize()))
+        plt.savefig('../../output_data/plots/polarity/%s_polarity_dist_snapshot.png' %
+                    (search_term), bbox_inches='tight')
+    else:
+        plt.title('%s Polarity Distribution 2018-2021' %
+                  (search_term.capitalize()))
+        plt.savefig('../../output_data/plots/polarity/%s_polarity_dist_extended.png' %
+                    (search_term), bbox_inches='tight')
+
+#+end_src
+
+** Objectivity vs Neutrality
+
+- Stacked bar charts provide visualisation of the breakdown for the sentiment values
+- The figure size has been manually adapted here as it was found that Matplotlib's automatic sizing didn't quite allow the user to have granualarity.
+- A percentage for volume was used as opposed to absolute values to allow for a comparison not only within a timeline but also to compare between the snapshot and extended.
+- Visiblity for the extended graph was particularly difficult to grasp given the 3.5 year timeframe, however, enough detail is provided.
+
+#+begin_src python
+
+def objec_neut_bar(chosen_dataframe, duration, search_term):
+    plt.figure(figsize=(12, 10))
+    pos_bar = plt.barh(chosen_dataframe.date,
+                       (chosen_dataframe.positive_percentage), color='blue')
+    neg_bar = plt.barh(chosen_dataframe.date,
+                       (chosen_dataframe.negative_percentage), left=chosen_dataframe.positive_percentage,  color='red')
+    neut_bar = plt.barh(chosen_dataframe.date, chosen_dataframe.neutral, left=(chosen_dataframe.positive_percentage + chosen_dataframe.negative_percentage),
+                        color='grey')
+    plt.legend([pos_bar, neg_bar, neut_bar], ["Positive Tweets", "Negative Tweets",
+                                              "Neutral Tweets"], title="% Breakdown", loc="upper right")
+    if duration == "snapshot":
+        plt.title('%s Ojective vs Neutral Distribution Mar 2021' %
+                  (search_term.capitalize()))
+        plt.savefig('../../output_data/plots/objectivity/%s_object_neut_bar_snapshot.png' %
+                    (search_term), bbox_inches='tight')
+    else:
+        plt.title('%s Ojective vs Neutral Distribution 2018-2021' %
+                  search_term.capitalize())
+        plt.savefig('../../output_data/plots/objectivity/%s_object_neut_bar_extended.png' %
+                    (search_term), bbox_inches='tight')
+
+#+end_src
+
+** Sentiment vs Price
+
+- The sentiment vs price graph required the use of a shared x-axis (date) to compare the two different variables (average sentiment and coin price).
+- x-axis ticks rotated 45 degrees to allow for improved reading
+- chosen_dataframe.average_polarity indicated the chosen column of the dataframe to be used for the y-axis (same can be said for chosen_prices_dataframe.Close)
+- ax2 = ax1.twinx() refers to the shared axis for each of the variables
+- Unfortunately due to the volume of data in the extended version, x-axis labels were not possible and so the tick markers were removed. Manual manipulation to datetime was attempted to allow for year only ticks, however, the volume of date change given only the first of every month was picked made it impossible to compare.
+
+#+begin_src python
+
+def sentiment_price_graph(chosen_dataframe, chosen_prices_dataframe, duration, search_term):
+    fig, ax1 = plt.subplots()
+    plt.xticks(rotation=45)
+    ax1.set_ylabel('Average Polarity', color='blue')
+    ax1.plot(chosen_dataframe.date,
+             chosen_dataframe.average_polarity, color='blue')
+    ax2 = ax1.twinx()
+    ax2.set_ylabel('Close Price ($USD)', color='green')
+    ax2.plot(chosen_dataframe.date,
+             chosen_prices_dataframe.Close, color='green')
+    fig.tight_layout()
+    if duration == "snapshot":
+        ax1.set_xlabel('Date')
+        plt.title('%s Average Polarity vs Price Mar 2021' %
+                  search_term.capitalize())
+        plt.savefig('../../output_data/plots/sentiment_price/%s_price_vs_polarity_snapshot.png' %
+                    (search_term), bbox_inches='tight')
+    else:
+        plt.xticks([])
+        plt.title('%s Average Polarity vs Price Jan 2018 - Aug 2021' %
+                  search_term.capitalize())
+        ax1.set_xlabel('January 2018 - August 2021')
+        plt.savefig('../../output_data/plots/sentiment_price/%s_price_vs_polarity_extended.png' %
+                    (search_term), bbox_inches='tight')
+
+#+end_src
+
+** Tweet Volume vs Price
+
+Similarly to the graph above, here we compare tweet volume to closing price. The specific dataframes are initialised in the function calls and passed through as function parameters.
+
+#+begin_src python
+
+def price_vs_tweet_volume(chosen_dataframe, chosen_prices_dataframe, duration, search_term):
+    fig, ax1 = plt.subplots()
+    plt.xticks(rotation=45)
+    ax1.set_xlabel('Date')
+    ax1.set_ylabel('Tweet Volume', color='blue')
+    ax1.plot(chosen_dataframe.Date,
+             chosen_dataframe.Tweets, color='blue')
+    ax2 = ax1.twinx()
+    ax2.set_ylabel('Close Price ($USD)', color='green')
+    ax2.plot(chosen_dataframe.Date,
+             chosen_prices_dataframe.Close, color='green')
+    fig.tight_layout()
+    if duration == "snapshot":
+        plt.title('%s Tweet Volume vs Price Mar 2021' %
+                  search_term.capitalize())
+        plt.savefig('../../output_data/plots/tweet_volume_price/%s_price_vs_tweet_snapshot.png' %
+                    (search_term), bbox_inches='tight')
+    else:
+        plt.xticks([])
+        plt.title('%s Tweet Volume vs Price Jan 2018 - Aug 2021' %
+                  search_term.capitalize())
+        plt.savefig('../../output_data/plots/tweet_volume_price/%s_price_vs_tweet_extended.png' %
+                    (search_term), bbox_inches='tight')
+
+
+#+end_src
+
+** Google Trend Interest vs Price
+
+Again, similar to the other two price predictors, both variables share the same x-axis for comparison and tick marks were removed for the extended graphs.
+
+#+begin_src python
+
+def price_vs_google_trend(chosen_dataframe, chosen_prices_dataframe, duration, search_term):
+    fig, ax1 = plt.subplots()
+    plt.xticks(rotation=45)
+    ax1.set_xlabel('Date')
+    ax1.set_ylabel('Trend Interest', color='blue')
+    ax1.plot(chosen_dataframe.Date,
+             chosen_dataframe.Search_Volume, color='blue')
+    ax2 = ax1.twinx()
+    ax2.set_ylabel('Close Price ($USD)', color='green')
+    ax2.plot(chosen_dataframe.Date,
+             chosen_prices_dataframe.Close, color='green')
+    fig.tight_layout()
+    if duration == "snapshot":
+        plt.title('%s Google Trend Interest vs Price Mar 2021' %
+                  search_term.capitalize())
+        plt.savefig('../../output_data/plots/google_trend_price/%s_price_vs_google_snapshot.png' %
+                    (search_term), bbox_inches='tight')
+    else:
+        plt.xticks([])
+        plt.title('%s Google Trend Interest vs Price Jan 2018 - Aug 2021' %
+                  search_term.capitalize())
+        plt.savefig('../../output_data/plots/google_trend_price/%s_price_vs_google_extended.png' %
+                    (search_term), bbox_inches='tight')
+
+#+end_src
+
+** Tweet Volume
+
+The tweet volume graph has been generated by the date sources from BitInfoCharts as opposed to a count of extracted tweets from Twint. This was due to the fact that upon investigation, Twint was only extracting up to 1/4 of all tweets.
+
+#+begin_src python
+
+def tweet_volume_graph(chosen_dataframe, duration, search_term):
+    chosen_dataframe.plot.line(x='Date', y='Tweets',  color='blue')
+    plt.xticks(rotation=45)
+    if duration == 'snapshot':
+        plt.title('%s Total Tweet Volume Mar 2021' % search_term.capitalize())
+        plt.savefig('../../output_data/plots/tweet_volume/%s_tweet_volume_snapshot.png' %
+                    (search_term), bbox_inches='tight')
+    else:
+        plt.title('%s Total Tweet Volume 2018 - 2021' %
+                  search_term.capitalize())
+        plt.savefig('../../output_data/plots/tweet_volume/%s_tweet_volume_extended.png' %
+                    (search_term), bbox_inches='tight')
+
+#+end_src
+
+** Correlation Heat map
+
+- This heatmap has been generated as a proof of concept to show that correlation cannot be used as a means of comparing the impact of the chosen variables on price. Due to the nature of delay from Tweet discussion/Google Search, the price of the coin (if causality could be proven) is not immediate.
+- Although the graphs above do show visual correlation, the data itself is based on a daily basis and therefore, it is often the case that increases in tweet volume or google trends interest is only reflected in the price the following day.
+
+#+begin_src python
+
+def corr_graph(chosen_dataframe, duration, search_term):
+    correlation = chosen_dataframe.corr()
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    axis_parameters = ax.matshow(correlation, cmap='seismic', vmin=-1, vmax=1)
+    fig.colorbar(axis_parameters)
+    tick_marks = np.arange(0, len(chosen_dataframe.columns), 1)
+    ax.set_xticks(tick_marks)
+    ax.set_yticks(tick_marks)
+    ax.set_xticklabels(chosen_dataframe.columns)
+    ax.set_yticklabels(chosen_dataframe.columns)
+    plt.xticks(rotation=45)
+    plt.title("%s Correlation HeatMap" % (search_term.capitalize()))
+    if duration == "snapshot":
+        plt.savefig('../../output_data/plots/correlation/%s_correlation_snapshot.png' %
+                    (search_term), bbox_inches='tight')
+    else:
+        plt.savefig('../../output_data/plots/correlation/%s_correlation_extended.png' %
+                    (search_term), bbox_inches='tight')
+
+#+end_src
+
+** Function Calls/Graph Creation
+
+- The following function calls generate each of the graphs in the output_data. This is done sequentially in the order of the funcitons detailed above.
+- The process for graph creation is as follows:
+  + Pandas .read_csv to read from the CSV file and create the relevant dataframe
+  + dataframes passed through as parameters for each of the functions, including relevant strings for snapshot and extended as well as naming the output files.
+- In some cases, there was the need to add a lineterminator parameter fue to the memory requirements and issues with pandas reading the names of the column headers.
+- Comments have been provided in the code to identify the steps for each graph creation.
+
+
+#+begin_src python
+
+# Coin Charts
+
+bitcoin_price_snapshot_df = pd.read_csv(
+    "../../input_data/bitcoin_cp_snapshot.csv")
+
+bitcoin_price_extended_df = pd.read_csv(
+    "../../input_data/bitcoin_cp_extended.csv")
+
+cardano_price_snapshot_df = pd.read_csv(
+    "../../input_data/cardano_cp_snapshot.csv")
+
+cardano_price_extended_df = pd.read_csv(
+    "../../input_data/cardano_cp_extended.csv")
+
+coin_prices(bitcoin_price_snapshot_df, "snapshot", "bitcoin")
+coin_prices(bitcoin_price_extended_df, "extended", "bitcoin")
+coin_prices(cardano_price_snapshot_df, "snapshot", "cardano")
+coin_prices(cardano_price_extended_df, "extended", "cardano")
+
+# Polarity Histograms
+
+bitcoin_cleaned_snapshot_df = pd.read_csv(
+    "../../output_data/clean_tweet_data/bitcoin_cleaned_tweets_snapshot.csv", lineterminator='\n')
+bitcoin_cleaned_snapshot_df['date'] = pd.to_datetime(
+    bitcoin_cleaned_snapshot_df['date'])
+
+bitcoin_cleaned_extended_df = pd.read_csv(
+    "../../output_data/clean_tweet_data/bitcoin_cleaned_tweets_extended.csv", lineterminator='\n')
+bitcoin_cleaned_extended_df['date'] = pd.to_datetime(
+    bitcoin_cleaned_extended_df['date'])
+
+cardano_cleaned_snapshot_df = pd.read_csv(
+    "../../output_data/clean_tweet_data/cardano_cleaned_tweets_snapshot.csv", lineterminator='\n')
+cardano_cleaned_snapshot_df['date'] = pd.to_datetime(
+    cardano_cleaned_snapshot_df['date'])
+
+cardano_cleaned_extended_df = pd.read_csv(
+    "../../output_data/clean_tweet_data/cardano_cleaned_tweets_extended.csv", lineterminator='\n')
+cardano_cleaned_extended_df['date'] = pd.to_datetime(
+    cardano_cleaned_extended_df['date'])
+
+polarity_hist(bitcoin_cleaned_snapshot_df, "snapshot", "bitcoin")
+polarity_hist(bitcoin_cleaned_extended_df, "extended", "bitcoin")
+polarity_hist(cardano_cleaned_snapshot_df, "snapshot", "cardano")
+polarity_hist(cardano_cleaned_extended_df, "extended", "cardano")
+
+# Ojectivity vs Neutrality
+
+bitcoin_sentiment_snapshot_df = pd.read_csv(
+    "../../output_data/sentiment_dataframes_csv/bitcoin_sentiment_dataframe_snapshot.csv", lineterminator='\n')
+
+bitcoin_sentiment_extended_df = pd.read_csv(
+    "../../output_data/sentiment_dataframes_csv/bitcoin_sentiment_dataframe_extended.csv")
+
+cardano_sentiment_snapshot_df = pd.read_csv(
+    "../../output_data/sentiment_dataframes_csv/cardano_sentiment_dataframe_snapshot.csv", lineterminator='\n')
+
+cardano_sentiment_extended_df = pd.read_csv(
+    "../../output_data/sentiment_dataframes_csv/cardano_sentiment_dataframe_extended.csv")
+
+objec_neut_bar(bitcoin_sentiment_snapshot_df, "snapshot", "bitcoin")
+objec_neut_bar(bitcoin_sentiment_extended_df, "extended", "bitcoin")
+objec_neut_bar(cardano_sentiment_snapshot_df, "snapshot", "cardano")
+objec_neut_bar(cardano_sentiment_extended_df, "extended", "cardano")
+
+# Sentiment vs Price
+
+bitcoin_sentiment_snapshot_df = pd.read_csv(
+    "../../output_data/sentiment_dataframes_csv/bitcoin_sentiment_dataframe_snapshot.csv", lineterminator='\n')
+
+bitcoin_price_snapshot_df = pd.read_csv(
+    "../../input_data/bitcoin_cp_snapshot.csv")
+
+bitcoin_sentiment_extended_df = pd.read_csv(
+    "../../output_data/sentiment_dataframes_csv/bitcoin_sentiment_dataframe_extended.csv")
+
+bitcoin_price_month_extended_df = pd.read_csv(
+    "../../input_data/bitcoin_cp_month_extended.csv")
+
+cardano_sentiment_snapshot_df = pd.read_csv(
+    "../../output_data/sentiment_dataframes_csv/cardano_sentiment_dataframe_snapshot.csv", lineterminator='\n')
+
+cardano_price_snapshot_df = pd.read_csv(
+    "../../input_data/cardano_cp_snapshot.csv")
+
+cardano_sentiment_extended_df = pd.read_csv(
+    "../../output_data/sentiment_dataframes_csv/cardano_sentiment_dataframe_extended.csv")
+
+cardano_price_month_extended_df = pd.read_csv(
+    "../../input_data/cardano_cp_month_extended.csv")
+
+
+sentiment_price_graph(bitcoin_sentiment_snapshot_df,
+                      bitcoin_price_snapshot_df, "snapshot", "bitcoin")
+sentiment_price_graph(bitcoin_sentiment_extended_df,
+                      bitcoin_price_month_extended_df, "extended", "bitcoin")
+sentiment_price_graph(cardano_sentiment_snapshot_df,
+                      cardano_price_snapshot_df, "snapshot", "cardano")
+sentiment_price_graph(cardano_sentiment_extended_df,
+                      cardano_price_month_extended_df, "extended", "cardano")
+
+# Tweet Volumes
+
+bitcoin_tweet_volume_snapshot_df = pd.read_csv(
+    "../../input_data/bitcoin_tv_snapshot.csv")
+bitcoin_tweet_volume_extended_df = pd.read_csv(
+    "../../input_data/bitcoin_tv_extended.csv")
+cardano_tweet_volume_snapshot_df = pd.read_csv(
+    "../../input_data/cardano_tv_snapshot.csv")
+cardano_tweet_volume_extended_df = pd.read_csv(
+    "../../input_data/cardano_tv_extended.csv")
+
+tweet_volume_graph(bitcoin_tweet_volume_snapshot_df, "snapshot", "bitcoin")
+tweet_volume_graph(bitcoin_tweet_volume_extended_df, "extended", "bitcoin")
+tweet_volume_graph(cardano_tweet_volume_snapshot_df, "snapshot", "cardano")
+tweet_volume_graph(cardano_tweet_volume_extended_df, "extended", "cardano")
+
+# Price vs Tweet Volume
+
+bitcoin_tweet_volume_snapshot_df = pd.read_csv(
+    "../../input_data/bitcoin_tv_snapshot.csv")
+
+bitcoin_price_snapshot_df = pd.read_csv(
+    "../../input_data/bitcoin_cp_snapshot.csv")
+
+bitcoin_tweet_volume_extended_df = pd.read_csv(
+    "../../input_data/bitcoin_tv_extended.csv")
+
+bitcoin_price_extended_df = pd.read_csv(
+    "../../input_data/bitcoin_cp_extended.csv")
+
+cardano_tweet_volume_snapshot_df = pd.read_csv(
+    "../../input_data/cardano_tv_snapshot.csv")
+
+cardano_price_snapshot_df = pd.read_csv(
+    "../../input_data/cardano_cp_snapshot.csv")
+
+cardano_tweet_volume_extended_df = pd.read_csv(
+    "../../input_data/cardano_tv_extended.csv")
+
+cardano_price_extended_df = pd.read_csv(
+    "../../input_data/cardano_cp_extended.csv")
+
+price_vs_tweet_volume(bitcoin_tweet_volume_snapshot_df,
+                      bitcoin_price_snapshot_df, "snapshot", "bitcoin")
+price_vs_tweet_volume(bitcoin_tweet_volume_extended_df,
+                      bitcoin_price_extended_df, "extended", "bitcoin")
+price_vs_tweet_volume(cardano_tweet_volume_snapshot_df,
+                      cardano_price_snapshot_df, "snapshot", "cardano")
+price_vs_tweet_volume(cardano_tweet_volume_extended_df,
+                      cardano_price_extended_df, "extended", "cardano")
+
+
+# Price vs Google Trends
+
+bitcoin_google_trend_snapshot_df = pd.read_csv(
+    "../../input_data/bitcoin_gt_snapshot.csv")
+
+bitcoin_price_snapshot_df = pd.read_csv(
+    "../../input_data/bitcoin_cp_snapshot.csv")
+
+bitcoin_google_trend_extended_df = pd.read_csv(
+    "../../input_data/bitcoin_gt_extended.csv")
+
+bitcoin_price_extended_df = pd.read_csv(
+    "../../input_data/bitcoin_cp_week_extended.csv")
+
+cardano_google_trend_snapshot_df = pd.read_csv(
+    "../../input_data/cardano_gt_snapshot.csv")
+
+cardano_price_snapshot_df = pd.read_csv(
+    "../../input_data/cardano_cp_snapshot.csv")
+
+cardano_google_trend_extended_df = pd.read_csv(
+    "../../input_data/cardano_gt_extended.csv")
+
+cardano_price_extended_df = pd.read_csv(
+    "../../input_data/cardano_cp_week_extended.csv")
+
+price_vs_google_trend(bitcoin_google_trend_snapshot_df,
+                      bitcoin_price_snapshot_df, "snapshot", "bitcoin")
+price_vs_google_trend(bitcoin_google_trend_extended_df,
+                      bitcoin_price_extended_df, "extended", "bitcoin")
+price_vs_google_trend(cardano_google_trend_snapshot_df,
+                      cardano_price_snapshot_df, "snapshot", "cardano")
+price_vs_google_trend(cardano_google_trend_extended_df,
+                      cardano_price_extended_df, "extended", "cardano")
+
+
+corr_df = pd.read_csv(
+    "../../output_data/correlation_data/bitcoin_correlation.csv")
+corr_graph(corr_df, "snapshot", "bitcoin")
+
+corr_df = pd.read_csv(
+    "../../output_data/correlation_data/cardano_correlation.csv")
+corr_graph(corr_df, "snapshot", "cardano")
+
+#+end_src
+
+* Import Information and Lessons Learnt
+
+- I found that Pandas often struggled to isolate each of the dataframes when reading multiple files, especially those with large numbers of rows.
+- Interestingly when multiple graphs were created at the same time, graphs were created, however, upon creating the graphs individually, they would be different, usually with fewer data points. This indicated that the dataframes were being held in memory and there was an overlap in the contents of the dataframe. Therefore, when creating multiple at the same time, there were either duplicates in the data or the dataframes were sharing information.
+- After I had made this discovery, each of the graphs were created one by one. Although this is a straightforward process, it is not ideal when time has been spent to create refactored functions that should be able to be called sequentially.
